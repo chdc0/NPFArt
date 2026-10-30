@@ -331,7 +331,7 @@ final class NowPlayingArtworkPatcher {
         let animated = MPMediaItemAnimatedArtwork(
             artworkID: identifier,
             previewImageRequestHandler: { _ in preview },
-            videoAssetFileURLRequestHandler: { [weak self] in
+            videoAssetFileURLRequestHandler: { [weak self] _ in
                 guard let self = self else { return nil }
                 return await self.videoURL(for: identifier, preview: preview)
             }
@@ -369,12 +369,9 @@ final class NowPlayingArtworkPatcher {
         let url = videoFileURL(for: identifier)
         if FileManager.default.fileExists(atPath: url.path) { return url }
 
-        lock.lock()
-        let alreadyRendering = rendering.contains(identifier)
-        if !alreadyRendering { rendering.insert(identifier) }
-        lock.unlock()
+        let isOwner = beginRendering(identifier)
 
-        if alreadyRendering {
+        if !isOwner {
             // Another request for the same artwork is encoding; wait for it.
             for _ in 0 ..< 300 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
@@ -383,11 +380,7 @@ final class NowPlayingArtworkPatcher {
             return nil
         }
 
-        defer {
-            lock.lock()
-            rendering.remove(identifier)
-            lock.unlock()
-        }
+        defer { endRendering(identifier) }
 
         let ok = await VideoMaker.make(
             image: preview,
@@ -408,6 +401,21 @@ final class NowPlayingArtworkPatcher {
 
     private func videoFileURL(for identifier: String) -> URL {
         cacheDirectory.appendingPathComponent(identifier + ".mp4")
+    }
+
+    /// Sync helpers so locking never happens in an async context.
+    private func beginRendering(_ identifier: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if rendering.contains(identifier) { return false }
+        rendering.insert(identifier)
+        return true
+    }
+
+    private func endRendering(_ identifier: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        rendering.remove(identifier)
     }
 
     private func pruneCache() {
