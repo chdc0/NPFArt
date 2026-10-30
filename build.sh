@@ -46,7 +46,8 @@ build_variant() {
         -wmo \
         -emit-library \
         -module-name NowPlayingFullArt \
-        -install_name "@rpath/${name}.dylib" \
+        -Xlinker -install_name \
+        -Xlinker "@rpath/${name}.dylib" \
         -framework UIKit \
         -framework MediaPlayer \
         -framework AVFoundation \
